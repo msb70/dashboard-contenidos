@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard de contenidos</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: #172033; background:#f6f7fb; }
+    body { margin:0; padding:24px; }
+    .wrap { max-width:1200px; margin:0 auto; }
+    h1 { margin:0 0 8px; }
+    .muted { color:#657083; }
+    .panel { background:white; border:1px solid #e5e8ef; border-radius:18px; padding:18px; box-shadow:0 8px 24px rgba(20,30,50,.06); }
+    .filters { display:grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap:12px; margin:20px 0; }
+    input, select { width:100%; box-sizing:border-box; padding:10px 12px; border:1px solid #d9deea; border-radius:12px; background:white; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { text-align:left; padding:12px; border-bottom:1px solid #edf0f5; vertical-align:top; }
+    th { font-size:13px; color:#657083; }
+    a { color:#2157d6; text-decoration:none; }
+    details summary { cursor:pointer; color:#2157d6; }
+    .badge { display:inline-block; padding:4px 8px; border-radius:999px; background:#eef3ff; color:#24458f; font-size:12px; }
+    @media (max-width: 850px) { .filters { grid-template-columns:1fr; } table, thead, tbody, tr, th, td { display:block; } thead{display:none;} td{border-bottom:0;padding:8px 0;} tr{border-bottom:1px solid #edf0f5;padding:12px 0;} }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Dashboard de contenidos</h1>
+    <p class="muted">Links compartidos por Miguel, resumidos y filtrables por fecha, tema y plataforma.</p>
+
+    <div class="panel">
+      <div class="filters">
+        <input id="q" placeholder="Buscar texto…" />
+        <select id="tema"><option value="">Todos los temas</option></select>
+        <select id="plataforma"><option value="">Todas las plataformas</option></select>
+        <input id="desde" type="date" />
+        <input id="hasta" type="date" />
+      </div>
+      <div id="status" class="muted">Cargando…</div>
+      <table id="tabla" hidden>
+        <thead>
+          <tr><th>Fecha</th><th>Tema</th><th>Plataforma</th><th>Resumen corto</th><th>Link</th><th>Detalle</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const DEFAULT_CSV_URL = 'https://docs.google.com/spreadsheets/d/1yQ4FFj60Kku7YiFvAnvbdOz8FuK-MPIVAOWNUgYV1eM/gviz/tq?tqx=out:csv&sheet=Contenidos';
+    const CSV_URL = new URLSearchParams(location.search).get('csv') || DEFAULT_CSV_URL;
+    const HEADERS = ['Fecha de envío','Plataforma','Tema','Resumen corto','Resumen largo','Link original','Estado de extracción','Notas / observaciones'];
+    let rows = [];
+
+    function parseCSV(text) {
+      const out = []; let row = [], cell = '', q = false;
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i], n = text[i+1];
+        if (q && c === '"' && n === '"') { cell += '"'; i++; }
+        else if (c === '"') q = !q;
+        else if (!q && c === ',') { row.push(cell); cell=''; }
+        else if (!q && (c === '\n' || c === '\r')) { if (cell || row.length) { row.push(cell); out.push(row); row=[]; cell=''; } if (c === '\r' && n === '\n') i++; }
+        else cell += c;
+      }
+      if (cell || row.length) { row.push(cell); out.push(row); }
+      return out;
+    }
+    function normalize(parsed) {
+      const header = parsed[0] || [];
+      return parsed.slice(1).filter(r => r.some(Boolean)).map(r => Object.fromEntries(HEADERS.map(h => [h, r[header.indexOf(h)] || ''])));
+    }
+    function unique(key) { return [...new Set(rows.map(r => r[key]).filter(Boolean))].sort((a,b)=>a.localeCompare(b)); }
+    function fillSelect(id, vals) { const el=document.getElementById(id); vals.forEach(v=>{ const o=document.createElement('option'); o.value=o.textContent=v; el.appendChild(o); }); }
+    function dateOnly(v) { return (v || '').slice(0,10); }
+    function esc(v) { return String(v || '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+    function safeUrl(v) { try { const u = new URL(v); return ['http:', 'https:'].includes(u.protocol) ? u.href : '#'; } catch { return '#'; } }
+    function render() {
+      const q = document.getElementById('q').value.toLowerCase();
+      const tema = document.getElementById('tema').value;
+      const plataforma = document.getElementById('plataforma').value;
+      const desde = document.getElementById('desde').value;
+      const hasta = document.getElementById('hasta').value;
+      const filtered = rows.filter(r => {
+        const blob = Object.values(r).join(' ').toLowerCase();
+        const d = dateOnly(r['Fecha de envío']);
+        return (!q || blob.includes(q)) && (!tema || r.Tema === tema) && (!plataforma || r.Plataforma === plataforma) && (!desde || d >= desde) && (!hasta || d <= hasta);
+      });
+      const tbody = document.querySelector('tbody'); tbody.innerHTML='';
+      filtered.forEach(r => {
+        const tr=document.createElement('tr');
+        const link = safeUrl(r['Link original']);
+        tr.innerHTML = `<td>${esc(r['Fecha de envío'])}</td><td><span class="badge">${esc(r.Tema)}</span></td><td>${esc(r.Plataforma)}</td><td>${esc(r['Resumen corto'])}</td><td><a href="${esc(link)}" target="_blank" rel="noopener">Abrir</a></td><td><details><summary>Ver</summary><p>${esc(r['Resumen largo'])}</p><p class="muted">Estado: ${esc(r['Estado de extracción'])}<br>${esc(r['Notas / observaciones'])}</p></details></td>`;
+        tbody.appendChild(tr);
+      });
+      document.getElementById('status').textContent = `${filtered.length} contenido(s)`;
+      document.getElementById('tabla').hidden = false;
+    }
+    async function main() {
+      if (!CSV_URL) { document.getElementById('status').textContent = 'Falta configurar la URL CSV pública de Google Sheets.'; return; }
+      const res = await fetch(CSV_URL); const text = await res.text(); rows = normalize(parseCSV(text));
+      fillSelect('tema', unique('Tema')); fillSelect('plataforma', unique('Plataforma'));
+      ['q','tema','plataforma','desde','hasta'].forEach(id => document.getElementById(id).addEventListener('input', render));
+      render();
+    }
+    main().catch(e => document.getElementById('status').textContent = 'Error cargando datos: ' + e.message);
+  </script>
+</body>
+</html>
